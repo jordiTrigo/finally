@@ -12,7 +12,7 @@ This is the capstone project for an agentic AI coding course. It is built entire
 
 ### First Launch
 
-The user runs a single Docker command (or a provided start script). A browser opens to `http://localhost:8000`. No login, no signup. They immediately see:
+The user runs a single Docker command (or a provided start script). A browser opens to `http://localhost:8001`. No login, no signup. They immediately see:
 
 - A watchlist of 10 default tickers with live-updating prices in a grid
 - $10,000 in virtual cash
@@ -22,7 +22,7 @@ The user runs a single Docker command (or a provided start script). A browser op
 ### What the User Can Do
 
 - **Watch prices stream** — prices flash green (uptick) or red (downtick) with subtle CSS animations that fade
-- **View sparkline mini-charts** — price action beside each ticker in the watchlist, accumulated on the frontend from the SSE stream since page load (sparklines fill in progressively)
+- **View sparkline mini-charts** — price action beside each ticker in the watchlist, accumulated on the frontend from the SSE stream since page load (sparklines fill in progressively). This is session-only by design: a page refresh starts the sparkline over rather than replaying price history from the server
 - **Click a ticker** to see a larger detailed chart in the main chart area
 - **Buy and sell shares** — market orders only, instant fill at current price, no fees, no confirmation dialog
 - **Monitor their portfolio** — a heatmap (treemap) showing positions sized by weight and colored by P&L, plus a P&L chart tracking total portfolio value over time
@@ -49,16 +49,16 @@ The user runs a single Docker command (or a provided start script). A browser op
 
 ```
 ┌─────────────────────────────────────────────────┐
-│  Docker Container (port 8000)                   │
+│  Docker Container (port 8001)                   │
 │                                                 │
 │  FastAPI (Python/uv)                            │
 │  ├── /api/*          REST endpoints             │
 │  ├── /api/stream/*   SSE streaming              │
-│  └── /*              Static file serving         │
-│                      (Next.js export)            │
+│  └── /*              Static file serving        │
+│                      (Next.js export)           │
 │                                                 │
 │  SQLite database (volume-mounted)               │
-│  Background task: market data polling/sim        │
+│  Background task: market data polling/sim       │
 └─────────────────────────────────────────────────┘
 ```
 
@@ -128,13 +128,17 @@ OPENROUTER_API_KEY=your-openrouter-api-key-here
 # If not set, the built-in market simulator is used (recommended for most users)
 MASSIVE_API_KEY=
 
+# Optional: Massive polling interval in seconds (only used when MASSIVE_API_KEY is set)
+# Defaults to 15 (free tier). Lower it if on a paid Massive plan (2-15s).
+MASSIVE_POLL_INTERVAL_SECONDS=15
+
 # Optional: Set to "true" for deterministic mock LLM responses (testing)
 LLM_MOCK=false
 ```
 
 ### Behavior
 
-- If `MASSIVE_API_KEY` is set and non-empty → backend uses Massive REST API for market data
+- If `MASSIVE_API_KEY` is set and non-empty → backend uses Massive REST API for market data, polling every `MASSIVE_POLL_INTERVAL_SECONDS`
 - If `MASSIVE_API_KEY` is absent or empty → backend uses the built-in market simulator
 - If `LLM_MOCK=true` → backend returns deterministic mock LLM responses (for E2E tests)
 - The backend reads `.env` from the project root (mounted into the container or read via docker `--env-file`)
@@ -159,9 +163,7 @@ Both the simulator and the Massive client implement the same abstract interface.
 ### Massive API (Optional)
 
 - REST API polling (not WebSocket) — simpler, works on all tiers
-- Polls for the union of all watched tickers on a configurable interval
-- Free tier (5 calls/min): poll every 15 seconds
-- Paid tiers: poll every 2-15 seconds depending on tier
+- Polls for the union of all watched tickers at `MASSIVE_POLL_INTERVAL_SECONDS` (default 15s, matching the free tier's 5 calls/min limit; paid-tier users lower this to 2-15s to match their plan)
 - Parses REST response into the same format as the simulator
 
 ### Shared Price Cache
@@ -175,7 +177,8 @@ Both the simulator and the Massive client implement the same abstract interface.
 
 - Endpoint: `GET /api/stream/prices`
 - Long-lived SSE connection; client uses native `EventSource` API
-- Server pushes price updates for all tickers known to the system at a regular cadence (~500ms) — in the single-user model this is equivalent to the user's watchlist
+- Server pushes price updates for all tickers known to the system at a fixed cadence (~500ms) — in the single-user model this is equivalent to the user's watchlist
+- The cadence is fixed regardless of source freshness: the stream always reads whatever is currently in the shared price cache and pushes it, rather than diffing against the source's actual refresh rate. For the simulator, that means a genuinely new price every tick. For Massive, whose cache entries only change every `MASSIVE_POLL_INTERVAL_SECONDS`, the same price is re-sent between polls with `previous == current` (a "flat" change direction) until the next poll updates the cache. This keeps the SSE layer source-agnostic and avoids per-source diffing logic
 - Each SSE event contains ticker, price, previous price, timestamp, and change direction
 - Client handles reconnection automatically (EventSource has built-in retry)
 
@@ -258,7 +261,7 @@ All tables include a `user_id` column defaulting to `"default"`. This is hardcod
 |--------|------|-------------|
 | GET | `/api/portfolio` | Current positions, cash balance, total value, unrealized P&L |
 | POST | `/api/portfolio/trade` | Execute a trade: `{ticker, quantity, side}` |
-| GET | `/api/portfolio/history` | Portfolio value snapshots over time (for P&L chart) |
+| GET | `/api/portfolio/history` | Portfolio value snapshots over time (for P&L chart). Returns the full history since first run — no pagination; snapshot volume stays small for single-user use |
 
 ### Watchlist
 | Method | Path | Description |
@@ -270,6 +273,7 @@ All tables include a `user_id` column defaulting to `"default"`. This is hardcod
 ### Chat
 | Method | Path | Description |
 |--------|------|-------------|
+| GET | `/api/chat` | Fetch recent chat history (used to repopulate the chat panel on page load/refresh) |
 | POST | `/api/chat` | Send a message, receive complete JSON response (message + executed actions) |
 
 ### System
@@ -281,7 +285,7 @@ All tables include a `user_id` column defaulting to `"default"`. This is hardcod
 
 ## 9. LLM Integration
 
-When writing code to make calls to LLMs, use cerebras-inference skill to use LiteLLM via OpenRouter to the `openrouter/openai/gpt-oss-120b` model with Cerebras as the inference provider. Structured Outputs should be used to interpret the results.
+When writing code to make calls to LLMs, use cerebras-inference skill to use LiteLLM via OpenRouter to the `openrouter/openai/gpt-oss-20b:free` model with Cerebras as the inference provider. Structured Outputs should be used to interpret the results.
 
 There is an OPENROUTER_API_KEY in the .env file in the project root.
 
@@ -290,7 +294,7 @@ There is an OPENROUTER_API_KEY in the .env file in the project root.
 When the user sends a chat message, the backend:
 
 1. Loads the user's current portfolio context (cash, positions with P&L, watchlist with live prices, total portfolio value)
-2. Loads recent conversation history from the `chat_messages` table
+2. Loads recent conversation history from the `chat_messages` table — the last 20 messages (10 user/assistant turns), to bound prompt size as the conversation grows. `GET /api/chat` reads from this same table to repopulate the chat panel on page load
 3. Constructs a prompt with a system message, portfolio context, conversation history, and the user's new message
 4. Calls the LLM via LiteLLM → OpenRouter, requesting structured output, using the cerebras-inference skill
 5. Parses the complete structured JSON response
@@ -357,14 +361,15 @@ The frontend is a single-page application with a dense, terminal-inspired layout
 - **Portfolio heatmap** — treemap visualization where each rectangle is a position, sized by portfolio weight, colored by P&L (green = profit, red = loss)
 - **P&L chart** — line chart showing total portfolio value over time, using data from `portfolio_snapshots`
 - **Positions table** — tabular view of all positions: ticker, quantity, avg cost, current price, unrealized P&L, % change
-- **Trade bar** — simple input area: ticker field, quantity field, buy button, sell button. Market orders, instant fill.
-- **AI chat panel** — docked/collapsible sidebar. Message input, scrolling conversation history, loading indicator while waiting for LLM response. Trade executions and watchlist changes shown inline as confirmations.
+- **Trade bar** — simple input area: ticker field, quantity field, buy button, sell button. Market orders, instant fill. Failed trades (insufficient cash or shares) show an inline error near the trade bar — no confirmation dialogs either way, on success or failure
+- **AI chat panel** — docked/collapsible sidebar. Loads recent history via `GET /api/chat` on mount. Message input, scrolling conversation history, loading indicator while waiting for LLM response. Trade executions and watchlist changes shown inline as confirmations.
 - **Header** — portfolio total value (updating live), connection status indicator, cash balance
 
 ### Technical Notes
 
 - Use `EventSource` for SSE connection to `/api/stream/prices`
-- Canvas-based charting library preferred (Lightweight Charts or Recharts) for performance
+- Lightweight Charts (canvas-based) for the price chart and P&L chart — chosen for rendering performance on frequently-updating series
+- Recharts (SVG-based) for the portfolio treemap heatmap — Lightweight Charts has no treemap primitive
 - Price flash effect: on receiving a new price, briefly apply a CSS class with background color transition, then remove it
 - All API calls go to the same origin (`/api/*`) — no CORS configuration needed
 - Tailwind CSS for styling with a custom dark theme
@@ -385,18 +390,18 @@ Stage 2: Python 3.12 slim
   - Copy backend/
   - uv sync (install Python dependencies from lockfile)
   - Copy frontend build output into a static/ directory
-  - Expose port 8000
+  - Expose port 8001
   - CMD: uvicorn serving FastAPI app
 ```
 
-FastAPI serves the static frontend files and all API routes on port 8000.
+FastAPI serves the static frontend files and all API routes on port 8001.
 
 ### Docker Volume
 
 The SQLite database persists via a named Docker volume:
 
 ```bash
-docker run -v finally-data:/app/db -p 8000:8000 --env-file .env finally
+docker run -v finally-data:/app/db -p 8001:8001 --env-file .env finally
 ```
 
 The `db/` directory in the project root maps to `/app/db` in the container. The backend writes `finally.db` to this path.
@@ -454,3 +459,21 @@ The container is designed to deploy to AWS App Runner, Render, or any container 
 - Portfolio visualization: heatmap renders with correct colors, P&L chart has data points
 - AI chat (mocked): send a message, receive a response, trade execution appears inline
 - SSE resilience: disconnect and verify reconnection
+
+---
+
+## 13. Doc Review — Questions, Clarifications, Simplification Opportunities
+
+### Open questions
+
+- **No `GET /api/chat` endpoint.** `chat_messages` is persisted, but §8 only lists `POST /api/chat`. On page refresh, does the chat panel start empty, or does it need to replay history? If history should survive a refresh, an endpoint to fetch it is needed; if not, worth saying so explicitly. — **Resolved:** added `GET /api/chat` to §8; §10 chat panel now loads via it on mount.
+- **Unbounded chat history in the prompt.** §9 says the backend "loads recent conversation history" — how much? Without a cap (e.g., last N messages or last N turns), the prompt sent to the LLM grows every turn for the life of the session. Worth pinning down a concrete limit. — **Resolved:** §9 now caps this at the last 20 messages (10 turns).
+- **SSE cadence vs. Massive polling interval.** §6 has the simulator updating every ~500ms but Massive's free tier polling every 15s, while §6's SSE section pushes "at a regular cadence (~500ms)" for all sources. Does the stream re-send an unchanged price every 500ms while waiting on the next Massive poll, or only push on actual change? Both are reasonable, but the doc reads as if cadence is source-agnostic, which isn't quite true for a 15s-poll source. — **Resolved:** §6 SSE Streaming now states the cadence is fixed and source-agnostic; unchanged prices are re-sent with a "flat" direction between Massive polls.
+- **Massive tier/poll-interval selection.** §6 lists rate-appropriate intervals per tier ("Free: 15s", "Paid: 2-15s") but doesn't say how the running app knows which tier applies — a config value, or does it just assume free tier? Worth one line. — **Resolved:** added `MASSIVE_POLL_INTERVAL_SECONDS` env var (§5), default 15s, referenced from §6.
+- **Sparkline state on reload.** §2 confirms sparklines accumulate client-side "since page load," which means a refresh empties them. That's a reasonable simplification, but stating it as a deliberate tradeoff (vs. an oversight) would save a future implementer from wondering if it's a bug. — **Resolved:** §2 now states this is deliberate, not persisted server-side.
+- **UI-initiated trade errors.** §12 tests "selling more than owned" and "buying with insufficient cash" as edge cases, and §9 covers how the LLM surfaces trade-validation errors in chat — but §8/§10 don't say how a manual trade-bar rejection is surfaced to the user (toast, inline message, etc.). Small gap, easy to close with one sentence. — **Resolved:** §10 trade bar bullet now specifies an inline error on failed trades.
+- **`/api/portfolio/history` range.** No query params are defined — does it always return the full history since first run, or is there an implicit window? For a long-running dev instance this could grow unbounded; worth deciding now even if the answer is "return everything, it's fine at this scale." — **Resolved:** §8 now states it returns the full history, no pagination.
+
+### Likely factual slip
+
+- §10 Technical Notes calls Recharts a "canvas-based charting library." Recharts renders to SVG (via D3), not canvas — Lightweight Charts is the canvas-based option of the two named. If both are still candidates, the "canvas-based" qualifier should either be dropped or scoped to just Lightweight Charts. Answer: Yes, get the Lightweight Charts. — **Resolved:** §10 now splits the two: Lightweight Charts for the price/P&L line charts, Recharts kept only for the treemap heatmap (which Lightweight Charts can't render).

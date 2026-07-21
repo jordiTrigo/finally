@@ -2,7 +2,7 @@
 
 A visually stunning AI-powered trading workstation that streams live market data, simulates portfolio trading, and integrates an LLM chat assistant that can analyze positions and execute trades via natural language.
 
-Built entirely by coding agents as a capstone project for an agentic AI coding course.
+Built entirely by coding agents as a capstone project for an agentic AI coding course. The full specification lives in [`planning/PLAN.md`](planning/PLAN.md).
 
 ## Features
 
@@ -15,7 +15,7 @@ Built entirely by coding agents as a capstone project for an agentic AI coding c
 
 ## Architecture
 
-Single Docker container serving everything on port 8000:
+Single Docker container serving everything on port 8001:
 
 - **Frontend**: Next.js (static export) with TypeScript and Tailwind CSS
 - **Backend**: FastAPI (Python/uv) with SSE streaming
@@ -23,19 +23,9 @@ Single Docker container serving everything on port 8000:
 - **AI**: LiteLLM → OpenRouter (Cerebras inference) with structured outputs
 - **Market data**: Built-in GBM simulator (default) or Massive API (optional)
 
-## Quick Start
+## Status
 
-```bash
-# Clone and configure
-cp .env.example .env
-# Add your OPENROUTER_API_KEY to .env
-
-# Run with Docker
-docker build -t finally .
-docker run -v finally-data:/app/db -p 8000:8000 --env-file .env finally
-
-# Open http://localhost:8000
-```
+This project is at the planning stage — `backend/`, `frontend/`, and `test/` are scaffolded but not yet implemented. See `planning/PLAN.md` for the full spec.
 
 ## Environment Variables
 
@@ -43,7 +33,10 @@ docker run -v finally-data:/app/db -p 8000:8000 --env-file .env finally
 |---|---|---|
 | `OPENROUTER_API_KEY` | Yes | OpenRouter API key for AI chat |
 | `MASSIVE_API_KEY` | No | Massive (Polygon.io) key for real market data; omit to use simulator |
+| `MASSIVE_POLL_INTERVAL_SECONDS` | No | Massive polling interval in seconds (default `15`) |
 | `LLM_MOCK` | No | Set `true` for deterministic mock LLM responses (testing) |
+
+Copy `.env.example` to `.env` and fill in your `OPENROUTER_API_KEY` to get started.
 
 ## Project Structure
 
