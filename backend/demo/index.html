@@ -70,13 +70,24 @@
   .dot.down { background: var(--down); }
 
   /* Cadence meter - the signature element. One bar per frame received, so the
-     500ms server cadence is visible as a steady rhythm rather than a number. */
+     500ms server cadence is visible as a steady rhythm rather than a number.
+     It is a rolling window: once full it scrolls left. Because a healthy stream
+     draws near-identical bars, every tenth frame is marked so the scroll stays
+     visible - otherwise a live stream looks identical to a frozen one. */
 
   .cadence {
     margin: 14px 0 18px;
     display: flex;
     align-items: center;
-    gap: 14px;
+    gap: 12px;
+  }
+
+  .label {
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    white-space: nowrap;
   }
 
   .track {
@@ -84,6 +95,7 @@
     height: 26px;
     display: flex;
     align-items: flex-end;
+    justify-content: flex-end;
     gap: 2px;
     overflow: hidden;
     border-bottom: 1px solid var(--border);
@@ -91,10 +103,13 @@
 
   .bar {
     width: 3px;
+    flex: 0 0 auto;
     background: var(--blue);
     opacity: 0.55;
     animation: rise 220ms ease-out;
   }
+  /* Every tenth frame, so the window visibly marches left as it scrolls. */
+  .bar.decade { background: var(--purple); opacity: 0.95; }
   .bar.latest { background: var(--accent); opacity: 1; }
 
   @keyframes rise { from { height: 2px; } }
@@ -172,6 +187,7 @@
   </header>
 
   <div class="cadence">
+    <span class="label">Recent frames</span>
     <div class="track" id="track"></div>
     <div class="readout">
       <b id="frames">0</b> frames &middot; <b id="cadence">--</b> ms &middot; <b id="events">0</b> updates
@@ -210,7 +226,9 @@
 
   var SPARK_POINTS = 60;
   var FRAME_GAP_MS = 100;   // a gap this long means a new server frame started
-  var MAX_BARS = 90;
+  var BAR_WIDTH = 3;        // keep in step with .bar width
+  var BAR_GAP = 2;          // keep in step with .track gap
+  var DECADE = 10;          // mark every Nth frame so the scroll stays visible
 
   var rows = document.getElementById("rows");
   var track = document.getElementById("track");
@@ -283,18 +301,33 @@
     }, 60);
   }
 
-  function pushBar(gap) {
+  // How many bars span the track. Derived from the rendered width so the window
+  // always fills it - a fixed count leaves a short strip that reads as a stalled
+  // progress bar once it stops growing.
+  function capacity() {
+    return Math.max(20, Math.floor((track.clientWidth + BAR_GAP) / (BAR_WIDTH + BAR_GAP)));
+  }
+
+  function trim() {
+    var max = capacity();
+    while (track.children.length > max) track.removeChild(track.firstChild);
+  }
+
+  function pushBar(gap, frameNumber) {
     var previous = track.lastElementChild;
     if (previous) previous.classList.remove("latest");
 
     var bar = document.createElement("div");
-    // Height encodes the gap: a steady stream draws a flat, even rhythm.
-    bar.className = "bar latest";
+    // Height encodes the gap: a steady stream draws a flat, even rhythm, and a
+    // hiccup shows up as a taller bar.
+    bar.className = "bar latest" + (frameNumber % DECADE === 0 ? " decade" : "");
     bar.style.height = Math.max(3, Math.min(26, gap / 25)) + "px";
     track.appendChild(bar);
 
-    while (track.children.length > MAX_BARS) track.removeChild(track.firstChild);
+    trim();
   }
+
+  window.addEventListener("resize", trim);
 
   function onUpdate(data) {
     var entry = tickers[data.ticker] || createRow(data.ticker);
@@ -335,7 +368,7 @@
       if (lastFrameAt) {
         var gap = frameStartedAt - lastFrameAt;
         cadenceLabel.textContent = Math.round(gap);
-        pushBar(gap);
+        pushBar(gap, frames);
       }
       lastFrameAt = frameStartedAt;
       frameStartedAt = now;
