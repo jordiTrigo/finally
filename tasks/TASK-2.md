@@ -1,0 +1,2 @@
+Please, read all the documentation in the planning folder.
+The Market Data backend has been implemented with tests. Please carry out a comprehensive code review, run all tests, and write your conclusions to a file MARKET_DATA_REVIEW.md in the planning folder.
