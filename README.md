@@ -2,7 +2,7 @@
 
 A visually stunning AI-powered trading workstation that streams live market data, simulates portfolio trading, and integrates an LLM chat assistant that can analyze positions and execute trades via natural language.
 
-Built entirely by coding agents as a capstone project for an agentic AI coding course. The full specification lives in [`planning/PLAN.md`](planning/PLAN.md).
+Built entirely by coding agents as a capstone project for an agentic AI coding course. The full specification lives in [`planning/PROJECT_SUMMARY.md`](planning/PROJECT_SUMMARY.md).
 
 ## Features
 
@@ -25,12 +25,24 @@ Single Docker container serving everything on port 8001:
 
 ## Status
 
-This project is at the planning stage — `backend/`, `frontend/`, and `test/` are scaffolded but not yet implemented. See `planning/PLAN.md` for the full spec.
+The market data backend is built and tested: GBM simulator, optional Massive client, shared
+price cache, and the SSE stream, wired into a FastAPI app. The database layer, portfolio and
+chat APIs, frontend, and Docker packaging are not started yet.
+
+To see the streaming stack working:
+
+```bash
+cd backend
+uv run python demo/market_data_demo.py
+```
+
+See [`planning/PROJECT_SUMMARY.md`](planning/PROJECT_SUMMARY.md) for the full spec and current
+build state.
 
 ## Environment Variables
 
 | Variable | Required | Description |
-|---|---|---|
+| --- | --- | --- |
 | `OPENROUTER_API_KEY` | Yes | OpenRouter API key for AI chat |
 | `MASSIVE_API_KEY` | No | Massive (Polygon.io) key for real market data; omit to use simulator |
 | `MASSIVE_POLL_INTERVAL_SECONDS` | No | Massive polling interval in seconds (default `15`) |
@@ -40,11 +52,11 @@ Copy `.env.example` to `.env` and fill in your `OPENROUTER_API_KEY` to get start
 
 ## Project Structure
 
-```
+```text
 finally/
 ├── frontend/    # Next.js static export
 ├── backend/     # FastAPI uv project
-├── planning/    # Project documentation and agent contracts
+├── planning/    # PROJECT_SUMMARY.md, plus archive/ of source documents
 ├── test/        # Playwright E2E tests
 ├── db/          # SQLite volume mount (runtime)
 └── scripts/     # Start/stop helpers
