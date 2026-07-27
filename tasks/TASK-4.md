@@ -1,0 +1,3 @@
+Please update all the documentation files located in the plannings folder to have one summary document inside the folder planning and move the other files, except planning/PLAN.md and planning/PROMPT-INIT.md, inside a new folder called ./plannings/archive.
+Finally make a little demo called Market Data Demo so that I could see for myself that we have something working. This demo must run in a terminal not with graphic interface. 
+Then push the local changes to github. Thanks.
