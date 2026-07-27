@@ -1,0 +1,1 @@
+Please read all the documents in the planning directory. Then design the market data backend in detail. Write a new document called MARKET_DATA_DESIGN.md inside the planning directory that has code snippets and examples to implement all the market data functionality (unified API, simulator, Massive API). Finally, create a pull request.
