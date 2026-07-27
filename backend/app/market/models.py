@@ -17,7 +17,7 @@ class PriceUpdate:
     direction: ChangeDirection
 
 
-def direction(price: float, previous: float) -> ChangeDirection:
+def compute_direction(price: float, previous: float) -> ChangeDirection:
     if price > previous:
         return ChangeDirection.UP
     if price < previous:

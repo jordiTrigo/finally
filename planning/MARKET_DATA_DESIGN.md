@@ -87,7 +87,7 @@ class PriceUpdate:
     direction: ChangeDirection
 
 
-def direction(price: float, previous: float) -> ChangeDirection:
+def compute_direction(price: float, previous: float) -> ChangeDirection:
     if price > previous:
         return ChangeDirection.UP
     if price < previous:
@@ -248,8 +248,11 @@ DT = 0.5 / (252 * 6.5 * 3600)
 W_MARKET, W_SECTOR, W_IDIO = 0.4, 0.3, 0.3
 
 # Occasional dramatic move: probability per ticker per tick, and its size range.
-EVENT_PROB = 0.001          # ~a few per ticker per hour at 500ms ticks
-EVENT_MIN, EVENT_MAX = 0.02, 0.05  # +/- 2-5% one-off jump
+# Sized against the diffusion step (0.010% per tick), not against a daily move:
+# a jump stays ~54x a normal tick while contributing only ~22% of per-tick
+# variance. See MARKET_SIMULATOR.md "Random Events" for why this matters.
+EVENT_PROB = 0.0001          # ~one per ticker per 80 minutes at 500ms ticks
+EVENT_MIN, EVENT_MAX = 0.003, 0.008  # +/- 0.3-0.8% one-off jump
 
 
 @dataclass
@@ -292,8 +295,11 @@ class SimulatorMarketDataSource:
             z_market = self._rng.standard_normal()
             z_sector: dict[str, float] = {}
             for ticker in get_tickers():
-                state = self._state.setdefault(ticker, self._init_state(ticker))
-                z_sector.setdefault(state.sector, self._rng.standard_normal())
+                if ticker not in self._state:
+                    self._state[ticker] = self._init_state(ticker)
+                state = self._state[ticker]
+                if state.sector not in z_sector:
+                    z_sector[state.sector] = self._rng.standard_normal()
                 z = self._combine(
                     z_market, z_sector[state.sector], self._rng.standard_normal()
                 )
@@ -303,7 +309,7 @@ class SimulatorMarketDataSource:
                     price=new_price,
                     previous_price=state.price,
                     timestamp=datetime.now(UTC).isoformat(),
-                    direction=direction(new_price, state.price),
+                    direction=compute_direction(new_price, state.price),
                 ))
                 state.price = new_price
             await asyncio.sleep(0.5)
@@ -333,9 +339,22 @@ from typing import Callable
 from massive import RESTClient
 
 from app.market.cache import PriceCache
-from app.market.models import PriceUpdate, direction
+from app.market.models import PriceUpdate, compute_direction
 
 logger = logging.getLogger(__name__)
+
+
+def _latest_price(snap) -> float | None:
+    """Last trade price, falling back to today's close; None if neither is present."""
+    if snap.last_trade is not None and snap.last_trade.price is not None:
+        return snap.last_trade.price
+    if snap.day is not None:
+        return snap.day.close
+    return None
+
+
+def _previous_close(snap) -> float | None:
+    return snap.prev_day.close if snap.prev_day is not None else None
 
 
 class MassiveMarketDataSource:
@@ -360,20 +379,29 @@ class MassiveMarketDataSource:
                 market_type="stocks",
                 tickers=tickers,
             )
+            self._cache_snapshots(cache, snapshots)
         except Exception:
             logger.exception("Massive poll failed; keeping previous cached prices")
-            return
+
+    def _cache_snapshots(self, cache: PriceCache, snapshots) -> None:
         now = datetime.now(UTC).isoformat()
         for snap in snapshots:
-            price = snap.last_trade.price if snap.last_trade else snap.day.close
-            previous = cache.get(snap.ticker)
-            prev_price = previous.price if previous else snap.prev_day.close
+            price = _latest_price(snap)
+            if price is None:
+                logger.warning("Snapshot for %s carries no price; skipping", snap.ticker)
+                continue
+            cached = cache.get(snap.ticker)
+            if cached is not None:
+                prev_price = cached.price
+            else:
+                prev_close = _previous_close(snap)
+                prev_price = prev_close if prev_close is not None else price
             cache.update(PriceUpdate(
                 ticker=snap.ticker,
                 price=price,
                 previous_price=prev_price,
                 timestamp=now,
-                direction=direction(price, prev_price),
+                direction=compute_direction(price, prev_price),
             ))
 ```
 
@@ -383,7 +411,16 @@ Notes:
   event loop responsive (`MASSIVE_API.md`, `MARKET_INTERFACE.md`).
 - A failed poll (network error, HTTP 429 rate limit, bad response) is logged and skipped; the
   cache keeps last-known prices until the next successful poll, so one bad poll never takes
-  down the stream.
+  down the stream. Parsing runs **inside** the same `try` — snapshot sub-objects are `None`
+  when the payload omits them (verified against `massive` 2.8.0:
+  `TickerSnapshot.from_dict({"ticker": "AAPL"})` leaves `day`, `prev_day` and `last_trade`
+  all `None`), and `MASSIVE_API.md` notes this happens around the daily reset. An unguarded
+  parse would raise out of `run()` and kill the background task permanently, freezing prices
+  while the app still looks healthy.
+- A snapshot carrying no usable price is skipped individually rather than discarding the
+  whole poll, so one bad entry cannot cost the other tickers their update.
+- A ticker seen for the first time with no `prev_day` falls back to its own current price,
+  reporting `FLAT` rather than raising on a `None` comparison.
 - `previous_price` comes from the cache's last value, not the API's `prev_day.close`, so two
   consecutive polls with an unchanged price correctly report `FLAT` instead of always
   comparing against yesterday's close.
@@ -440,14 +477,24 @@ restart.
 
 ```python
 import asyncio
+import contextlib
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
-from app.market.cache import PriceCache
-from app.market.factory import create_market_data_source
-from app.market.stream import router as stream_router
-from app.db import get_watchlist_tickers  # owned by the API/DB layer
+from app.market import PriceCache, create_market_data_source
+from app.market import router as stream_router
+
+# PLAN.md section 7 seeds these ten tickers into SQLite. Until the DB layer lands,
+# the callback serves them directly - the market layer only needs `() -> list[str]`,
+# so swapping in `app.db.get_watchlist_tickers` later touches nothing else.
+DEFAULT_WATCHLIST = [
+    "AAPL", "GOOGL", "MSFT", "AMZN", "TSLA", "NVDA", "META", "JPM", "V", "NFLX",
+]
+
+
+def get_watchlist_tickers() -> list[str]:
+    return list(DEFAULT_WATCHLIST)
 
 
 @asynccontextmanager
@@ -457,21 +504,22 @@ async def lifespan(app: FastAPI):
 
     source = create_market_data_source()
     task = asyncio.create_task(source.run(cache, get_watchlist_tickers))
-
     try:
         yield
     finally:
         task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await task
-        except asyncio.CancelledError:
-            pass
 
 
 app = FastAPI(lifespan=lifespan)
 app.include_router(stream_router)
 # ... other routers (portfolio, watchlist, chat) included here
 ```
+
+`get_watchlist_tickers` is currently a module-level stub returning the seeded ten. The DB
+layer replaces its body with a SQLite read; nothing else in the market package changes,
+since it only depends on the `() -> list[str]` shape.
 
 `get_watchlist_tickers` is a plain `() -> list[str]` supplied by the DB layer. The market
 package depends only on that callback signature — it never imports the watchlist model,
@@ -556,4 +604,24 @@ The HTTP call is the only thing to mock — inject a fake client or monkeypatch
   ticker, each a valid `PriceUpdate` JSON with `ticker`, `price`, `previous_price`,
   `timestamp`, `direction`.
 - The generator exits cleanly on client disconnect (assert via a mocked `is_disconnected`).
-```
+
+### End-to-end (`tests/test_app.py`)
+
+One integration test mounts the real app and reads the real stream, covering the wiring that
+unit tests cannot: cache in `app.state`, background task launched, router mounted.
+
+**`httpx.ASGITransport` cannot be used here.** It buffers the entire response, so an endless
+SSE generator never yields under it and the test hangs before the status line — this is a
+transport limitation, not an app bug (a trivial infinite generator hangs identically). Drive
+a real `uvicorn.Server` on port 0 and connect a real `AsyncClient` instead.
+
+### Test-environment notes
+
+- `massive` is a hard dependency and installs from the lockfile, so tests import it for real
+  and monkeypatch `app.market.massive.RESTClient`. Do not stub the package in `sys.modules`:
+  the stub leaks across the whole session and hides real API drift.
+- Lifecycle tests monkeypatch `TICK_INTERVAL_SECONDS` / `SSE_INTERVAL_SECONDS` rather than
+  sleeping on the production cadence.
+- The chaining invariant (`previous_price` == prior tick's `price`) must be asserted over
+  every update, not by sampling the cache — sampling silently skips ticks and the invariant
+  only holds between consecutive updates.

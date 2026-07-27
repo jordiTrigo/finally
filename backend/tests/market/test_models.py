@@ -3,7 +3,7 @@ from dataclasses import FrozenInstanceError, asdict
 
 import pytest
 
-from app.market.models import ChangeDirection, PriceUpdate, direction
+from app.market.models import ChangeDirection, PriceUpdate, compute_direction
 
 
 @pytest.mark.parametrize(
@@ -15,7 +15,7 @@ from app.market.models import ChangeDirection, PriceUpdate, direction
     ],
 )
 def test_direction(price, previous, expected):
-    assert direction(price, previous) == expected
+    assert compute_direction(price, previous) == expected
 
 
 def test_change_direction_values_are_plain_strings():

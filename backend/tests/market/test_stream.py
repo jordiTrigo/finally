@@ -35,7 +35,6 @@ def make_update(ticker: str, price: float, previous: float, direction: ChangeDir
     )
 
 
-@pytest.mark.asyncio
 async def test_generator_emits_one_event_per_cached_ticker():
     cache = PriceCache()
     cache.update(make_update("AAPL", 190.0, 189.0, ChangeDirection.UP))
@@ -52,7 +51,6 @@ async def test_generator_emits_one_event_per_cached_ticker():
         assert set(payload.keys()) == {"ticker", "price", "previous_price", "timestamp", "direction"}
 
 
-@pytest.mark.asyncio
 async def test_generator_exits_cleanly_on_disconnect():
     cache = PriceCache()
     cache.update(make_update("AAPL", 190.0, 189.0, ChangeDirection.UP))
@@ -64,7 +62,6 @@ async def test_generator_exits_cleanly_on_disconnect():
         await gen.__anext__()
 
 
-@pytest.mark.asyncio
 async def test_generator_re_reads_cache_snapshot_each_cycle(monkeypatch):
     monkeypatch.setattr(stream_module, "SSE_INTERVAL_SECONDS", 0.01)
     cache = PriceCache()
@@ -80,13 +77,14 @@ async def test_generator_re_reads_cache_snapshot_each_cycle(monkeypatch):
     assert json.loads(second_event["data"])["price"] == 191.0
 
 
-@pytest.mark.asyncio
-async def test_stream_prices_route_reads_cache_from_app_state():
+async def test_stream_prices_route_streams_the_cache_held_in_app_state():
     cache = PriceCache()
     cache.update(make_update("AAPL", 190.0, 189.0, ChangeDirection.UP))
     app = SimpleNamespace(state=SimpleNamespace(price_cache=cache))
     request = FakeRequest(app=app)
 
     response = await stream_prices(request)
+    first_event = await response.body_iterator.__anext__()
 
     assert isinstance(response, EventSourceResponse)
+    assert json.loads(first_event["data"])["ticker"] == "AAPL"

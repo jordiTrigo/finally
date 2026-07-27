@@ -342,3 +342,63 @@ In priority order:
 5. Fix the eager `setdefault` draw (Finding 5).
 6. Close the test gaps in Finding 7, particularly `seed_for` fallback and the
    `previous_price` chaining invariant.
+
+---
+
+## Resolution
+
+All ten findings were addressed. Suite: **46 passed**, 5.0s, no warnings (was 33 passed,
+1 failed). Every fix was driven test-first, and a mutation check confirmed each new test
+fails when the corresponding production behavior is reverted.
+
+| # | Finding | Resolution |
+| --- | --- | --- |
+| 1 | Correlation swamped by event jumps | Both parts done — see below |
+| 2 | Malformed snapshot kills the stream | Parsing moved inside the `try`; unusable snapshots skipped individually; missing `prev_day` falls back to the current price (`FLAT`) |
+| 3 | `uv.lock` not committed | Committed |
+| 4 | Tests shadow the real `massive` | `sys.modules` stub and the `test_factory` conditional removed; tests now import the real `massive.rest.RESTClient` and monkeypatch only the constructor |
+| 5 | Wasted RNG draws | Replaced eager `setdefault` with explicit membership checks |
+| 6 | No FastAPI wiring | `app/main.py` added with the lifespan handler; `get_watchlist_tickers` is a stub over the seeded ten until the DB layer lands |
+| 7 | Test coverage gaps | All five closed, including an end-to-end test over a real uvicorn server |
+| 8 | Timing-coupled tests | `TICK_INTERVAL_SECONDS` monkeypatched; those three tests went from 2.4s to ~0.25s |
+| 9 | Redundant asyncio config | Explicit `@pytest.mark.asyncio` markers removed; `asyncio_mode = "auto"` retained |
+| 10 | `direction` name collision | Renamed to `compute_direction` |
+
+## Finding 1 in detail
+
+Two independent changes, as recommended:
+
+- **The test now measures the diffusion component** (events disabled), which is what the
+  factor model actually governs. A second test,
+  `test_event_jumps_do_not_swamp_the_correlated_component`, guards the parameter balance the
+  first one depends on.
+- **The volatility budget was rebalanced.** `EVENT_PROB` 0.001 → 0.0001 and the jump size
+  ±2–5% → ±0.3–0.8%.
+
+This is a deliberate departure from `MARKET_SIMULATOR.md`'s original "±2–5%", which was
+sized against a daily move rather than a 500ms tick. `MARKET_SIMULATOR.md` and
+`MARKET_DATA_DESIGN.md` were updated with the new values and the reasoning.
+
+Measured before and after:
+
+| Metric | Before | After | Target |
+| --- | --- | --- | --- |
+| Same-sector correlation (events on) | 0.008 | **0.547** | > 0 |
+| Cross-sector correlation (events on) | 0.003 | **0.341** | > 0, weaker |
+| Hourly volatility | 9.6% | **0.95%** | ~0.87% |
+| Implied annualized volatility | ~390% | **38%** | 35% |
+| AAPL range after 1 hour (200 runs) | $146.56–$240.60 | **$184.62–$193.75** | plausible |
+| Events as share of per-tick variance | ~99% | **22%** | minority |
+
+Jumps remain visible: ~54x a normal tick, about $1 on a $190 stock, roughly one per ticker
+every 80 minutes. If more drama is wanted, `EVENT_MIN`/`EVENT_MAX` are the knob — the
+trade-off is documented in `MARKET_SIMULATOR.md`.
+
+## Notes for later work
+
+- `app/main.py` has no `/api/health` endpoint yet (`PLAN.md` §8 lists it under System). It
+  belongs to the API layer task, not the market data layer.
+- `get_watchlist_tickers` in `app/main.py` is the single line the DB layer replaces.
+- `httpx.ASGITransport` buffers whole responses, so it cannot test an endless SSE stream —
+  `tests/test_app.py` drives a real uvicorn server instead. Worth knowing before anyone
+  tries to "simplify" that test.

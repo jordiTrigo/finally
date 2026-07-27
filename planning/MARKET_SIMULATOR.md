@@ -56,7 +56,16 @@ This gives tech names visibly co-moving on tech-heavy days, all ten tickers dipp
 
 ## Random Events
 
-To avoid every tick looking like smooth noise, each tick has a small independent probability (e.g. ~0.1% per ticker per tick, roughly a few times per ticker per hour at 500ms ticks) of a one-off "event": an extra ±2–5% jump applied on top of the normal GBM step for that ticker only. This is what `PLAN.md` §6 calls "occasional random events for drama" — it's cosmetic, meant to occasionally give the watchlist a ticker flashing a big move, not a realistic jump-diffusion model.
+To avoid every tick looking like smooth noise, each tick has a small independent probability of a one-off "event": an extra jump applied on top of the normal GBM step for that ticker only. This is what `PLAN.md` §6 calls "occasional random events for drama" — it's cosmetic, meant to occasionally give the watchlist a ticker flashing a big move, not a realistic jump-diffusion model.
+
+**Jumps must be sized against the tick, not against a daily move.** A 500ms step is tiny — `sigma*sqrt(dt)` is about 0.010% at `sigma=0.35` — so a jump that looks modest on a daily chart is enormous per tick. Concretely, an initial ±2–5% jump at 0.1% probability per tick carried roughly **114x** the variance of the diffusion term, which:
+
+- pushed realised volatility to ~390% annualized against the 35% the sector params specify, so seed prices wandered far from their realistic levels within an hour; and
+- destroyed the sector correlation below, because event draws are independent per ticker — measured same-sector correlation collapsed from 0.735 to 0.008.
+
+The parameters therefore are **±0.3–0.8% at 0.01% probability per tick** (`EVENT_PROB = 0.0001`): roughly one jump per ticker every 80 minutes, still ~54x a normal tick (about $1 on a $190 stock, an obvious flash in the UI), while contributing only ~22% of per-tick variance. Measured outcome: 0.95% hourly volatility (38% annualized), same-sector correlation 0.547, cross-sector 0.341.
+
+If bigger jumps are ever wanted for demo drama, raise the magnitude knowingly — the trade-off is that the GBM parameters and seed prices stop being meaningful.
 
 ## Update Cadence and Lifecycle
 
@@ -102,5 +111,6 @@ class SimulatorMarketDataSource:
 
 - With a fixed seed, `_step` and a full `run()` tick are fully deterministic — tests assert exact output values, not just "price changed within a range."
 - Test that prices stay positive over a long simulated run (GBM guarantees this analytically, but worth a regression test given floating-point step accumulation).
-- Test that two tickers in the same sector show non-zero correlation over many ticks (e.g. correlation coefficient of their returns is significantly above zero), and that the market-wide factor produces correlation across sectors too, just weaker.
+- Test that two tickers in the same sector show non-zero correlation over many ticks (e.g. correlation coefficient of their returns is significantly above zero), and that the market-wide factor produces correlation across sectors too, just weaker. Measure this with events disabled — correlation is a property of the factor model, and the independent per-ticker jumps only add noise to it. A separate test asserts the jumps stay small enough not to swamp that correlation.
+- Test the volatility budget directly: over a simulated trading hour, a `sigma=0.35` ticker should move about 0.87% (`0.35/sqrt(252*6.5)`). This is what catches mis-scaled event parameters, which no other test notices.
 - Test that a ticker added mid-run (simulating a watchlist addition) gets lazily initialized from the seed table and starts producing updates on the next tick, without restarting the source.

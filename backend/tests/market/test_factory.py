@@ -1,8 +1,8 @@
-import sys
-import types
 from unittest.mock import MagicMock
 
+import app.market.massive as massive_module
 from app.market.factory import create_market_data_source
+from app.market.massive import MassiveMarketDataSource
 from app.market.simulator import SimulatorMarketDataSource
 
 
@@ -23,16 +23,9 @@ def test_returns_simulator_when_massive_api_key_is_empty_string(monkeypatch):
 
 
 def test_returns_massive_source_when_api_key_set(monkeypatch):
-    if "massive" not in sys.modules:
-        stub = types.ModuleType("massive")
-        stub.RESTClient = MagicMock()
-        monkeypatch.setitem(sys.modules, "massive", stub)
-    else:
-        monkeypatch.setattr(sys.modules["massive"], "RESTClient", MagicMock())
-
+    # Stub only the client construction; the real `massive` package still imports.
+    monkeypatch.setattr(massive_module, "RESTClient", MagicMock())
     monkeypatch.setenv("MASSIVE_API_KEY", "test-key")
-
-    from app.market.massive import MassiveMarketDataSource
 
     source = create_market_data_source()
 
