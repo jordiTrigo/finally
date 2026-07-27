@@ -7,11 +7,28 @@ from typing import Callable
 from massive import RESTClient
 
 from app.market.cache import PriceCache
-from app.market.models import PriceUpdate, direction
+from app.market.models import PriceUpdate, compute_direction
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_POLL_INTERVAL_SECONDS = 15.0
+
+
+def _latest_price(snap) -> float | None:
+    """Last trade price, falling back to today's close.
+
+    Snapshot sub-objects are None when the payload omits them, which happens
+    around the daily reset (MASSIVE_API.md), so both are optional.
+    """
+    if snap.last_trade is not None and snap.last_trade.price is not None:
+        return snap.last_trade.price
+    if snap.day is not None:
+        return snap.day.close
+    return None
+
+
+def _previous_close(snap) -> float | None:
+    return snap.prev_day.close if snap.prev_day is not None else None
 
 
 class MassiveMarketDataSource:
@@ -40,18 +57,27 @@ class MassiveMarketDataSource:
                 market_type="stocks",
                 tickers=tickers,
             )
+            self._cache_snapshots(cache, snapshots)
         except Exception:
             logger.exception("Massive poll failed; keeping previous cached prices")
-            return
+
+    def _cache_snapshots(self, cache: PriceCache, snapshots) -> None:
         now = datetime.now(UTC).isoformat()
         for snap in snapshots:
-            price = snap.last_trade.price if snap.last_trade else snap.day.close
-            previous = cache.get(snap.ticker)
-            prev_price = previous.price if previous else snap.prev_day.close
+            price = _latest_price(snap)
+            if price is None:
+                logger.warning("Snapshot for %s carries no price; skipping", snap.ticker)
+                continue
+            cached = cache.get(snap.ticker)
+            if cached is not None:
+                prev_price = cached.price
+            else:
+                prev_close = _previous_close(snap)
+                prev_price = prev_close if prev_close is not None else price
             cache.update(PriceUpdate(
                 ticker=snap.ticker,
                 price=price,
                 previous_price=prev_price,
                 timestamp=now,
-                direction=direction(price, prev_price),
+                direction=compute_direction(price, prev_price),
             ))

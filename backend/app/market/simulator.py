@@ -7,7 +7,7 @@ from typing import Callable
 import numpy as np
 
 from app.market.cache import PriceCache
-from app.market.models import PriceUpdate, direction
+from app.market.models import PriceUpdate, compute_direction
 from app.market.seed_prices import SECTOR_PARAMS, seed_for
 
 # 500ms as a fraction of a trading year (252 days x 6.5h x 3600s).
@@ -17,8 +17,13 @@ DT = 0.5 / (252 * 6.5 * 3600)
 W_MARKET, W_SECTOR, W_IDIO = 0.4, 0.3, 0.3
 
 # Occasional dramatic move: probability per ticker per tick, and its size range.
-EVENT_PROB = 0.001          # ~a few per ticker per hour at 500ms ticks
-EVENT_MIN, EVENT_MAX = 0.02, 0.05  # +/- 2-5% one-off jump
+# Sized against the diffusion step, which is only sigma*sqrt(DT) = 0.010% per tick:
+# a jump is still ~50x a normal tick (about $1 on a $190 stock, an obvious flash in
+# the UI) while contributing ~29% of per-tick variance. Larger jumps would swamp the
+# GBM entirely - at +/-2-5% they carried ~114x the diffusion variance, pushing
+# realised volatility to ~390% annualized and destroying the sector correlation.
+EVENT_PROB = 0.0001          # ~one per ticker per 80 minutes at 500ms ticks
+EVENT_MIN, EVENT_MAX = 0.003, 0.008  # +/- 0.3-0.8% one-off jump
 
 TICK_INTERVAL_SECONDS = 0.5
 
@@ -63,8 +68,11 @@ class SimulatorMarketDataSource:
             z_market = self._rng.standard_normal()
             z_sector: dict[str, float] = {}
             for ticker in get_tickers():
-                state = self._state.setdefault(ticker, self._init_state(ticker))
-                z_sector.setdefault(state.sector, self._rng.standard_normal())
+                if ticker not in self._state:
+                    self._state[ticker] = self._init_state(ticker)
+                state = self._state[ticker]
+                if state.sector not in z_sector:
+                    z_sector[state.sector] = self._rng.standard_normal()
                 z = self._combine(
                     z_market, z_sector[state.sector], self._rng.standard_normal()
                 )
@@ -74,7 +82,7 @@ class SimulatorMarketDataSource:
                     price=new_price,
                     previous_price=state.price,
                     timestamp=datetime.now(UTC).isoformat(),
-                    direction=direction(new_price, state.price),
+                    direction=compute_direction(new_price, state.price),
                 ))
                 state.price = new_price
             await asyncio.sleep(TICK_INTERVAL_SECONDS)
