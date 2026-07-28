@@ -1,9 +1,5 @@
 # FinAlly Project - the Finance Ally
 
-All project documentation is in the `planning` directory. `planning/PROJECT_SUMMARY.md` is the
-single entry point; the documents it was distilled from live in `planning/archive/` and remain
-authoritative on their own subjects.
+The key document is PLAN.md included in full below; the market data component has been completed and is summarized in the file `planning/PROJECT_SUMMARY.md` and there are some files with more details in the `plannings/archive` folder. Consult these docs only when required. The remainder of the platform is still to be developed.
 
-The key document is PROJECT_SUMMARY.md included in full below:
-
-@planning/PROJECT_SUMMARY.md
+@planning/PLAN.md
