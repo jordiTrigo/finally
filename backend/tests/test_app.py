@@ -12,7 +12,8 @@ import json
 import uvicorn
 from httpx import AsyncClient
 
-from app.main import DEFAULT_WATCHLIST, app
+from app.db.schema import DEFAULT_WATCHLIST
+from app.main import app
 
 
 @contextlib.asynccontextmanager

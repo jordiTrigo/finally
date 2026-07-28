@@ -9,6 +9,8 @@ dependencies = [
     "sse-starlette>=2.1",
     "numpy>=2.1",
     "massive>=1.0",
+    "litellm>=1.93.0",
+    "pydantic>=2.13.4",
 ]
 
 [dependency-groups]

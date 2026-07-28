@@ -4,7 +4,7 @@ The single entry point for FinAlly. It carries the specification, the architectu
 current build state. The documents it was distilled from live in [`archive/`](#archive) and
 remain the authority on their own subjects.
 
-Last updated: 2026-07-27.
+Last updated: 2026-07-28.
 
 ## 1. What FinAlly Is
 
@@ -30,23 +30,25 @@ Accent yellow `#ecad0a`, blue primary `#209dd7`, purple secondary `#753991` (sub
 
 ## 2. Build Status
 
+Feature complete. Built by the six-engineer agent team described in [`TEAM.md`](TEAM.md).
+
 | Area | State |
 | --- | --- |
-| Market data layer (`backend/app/market/`) | **Done** — simulator, Massive client, cache, SSE stream, 46 tests |
-| App wiring (`backend/app/main.py`) | **Done** — lifespan, background source task, stream router |
+| Market data layer (`backend/app/market/`) | **Done** — simulator, Massive client, cache, SSE stream |
+| Database layer (`backend/app/db/`) | **Done** — schema, lazy init, seed, repositories, trade math |
+| Portfolio + watchlist API (`backend/app/api/`) | **Done** — all routes, snapshot task |
+| LLM chat (`backend/app/llm/`) | **Done** — Cerebras structured outputs, auto-execution, mock mode |
+| Frontend (`frontend/`) | **Done** — Next.js 16 static export, full terminal UI |
+| Docker, scripts (`Dockerfile`, `scripts/`) | **Done** — multi-stage image, idempotent start/stop |
+| E2E tests (`test/`) | **Done** — Playwright suite against the production image |
 | Market Data Demo (`backend/demo/`) | **Done** — live browser demo of the stream |
-| Database layer (SQLite, schema, seed) | Not started |
-| Portfolio + watchlist API | Not started |
-| LLM chat integration | Not started |
-| Frontend (Next.js) | Not started — `frontend/` is empty |
-| Docker, scripts, E2E tests | Not started — `test/` is empty, no `scripts/` yet |
 
-Two known stubs left deliberately in the completed work:
+Test counts: 177 backend (pytest), 84 frontend (vitest), 26 E2E (Playwright). All passing.
 
-- `get_watchlist_tickers` in `backend/app/main.py` returns the seeded ten tickers directly.
-  The DB layer replaces that one function body; nothing else in the market package changes,
-  because it only depends on the `() -> list[str]` shape.
-- No `/api/health` endpoint yet. It belongs to the API layer task.
+Known environment issue, not a code defect: the `MASSIVE_API_KEY` in `.env` returns
+`NOT_AUTHORIZED` from Massive — the plan is not entitled to the snapshot endpoint. Because a
+non-empty key selects the Massive source, every price stays null and the whole UI shows `--`.
+Leave `MASSIVE_API_KEY` empty to use the simulator, which is the recommended default anyway.
 
 ## 3. Architecture
 
@@ -305,4 +307,6 @@ Source documents, still authoritative on their own subjects:
 | [`archive/MARKET_SIMULATOR.md`](archive/MARKET_SIMULATOR.md) | The GBM model, correlation factors, and event sizing |
 | [`archive/MASSIVE_API.md`](archive/MASSIVE_API.md) | Massive (ex-Polygon) REST reference, rate limits, response shapes |
 | [`archive/MARKET_DATA_REVIEW.md`](archive/MARKET_DATA_REVIEW.md) | Code review of the market data layer and how each finding was resolved |
+| [`TEAM.md`](TEAM.md) | The agent team contract: ownership, frozen DB and API interfaces, build order |
+| [`E2E_REPORT.md`](E2E_REPORT.md) | End-to-end results, findings, and the test infrastructure traps |
 | [`archive/PROMPT-INIT.md`](archive/PROMPT-INIT.md) | The prompt that produced the three market data research documents |

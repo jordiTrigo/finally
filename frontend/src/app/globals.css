@@ -1,0 +1,85 @@
+@import "tailwindcss";
+
+/* FinAlly terminal palette. Dark, never pure black, muted borders. */
+@theme {
+  --color-terminal-bg: #0d1117;
+  --color-terminal-panel: #131a23;
+  --color-terminal-raised: #182029;
+  --color-terminal-border: #263140;
+  --color-terminal-text: #c9d5e1;
+  --color-terminal-muted: #7d8da0;
+  --color-terminal-up: #26a65b;
+  --color-terminal-down: #e0453e;
+  --color-terminal-accent: #ecad0a;
+  --color-terminal-blue: #209dd7;
+  --color-terminal-purple: #753991;
+
+  --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", "Cascadia Mono", Menlo,
+    Consolas, monospace;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--color-terminal-bg);
+  color: var(--color-terminal-text);
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.4;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Price flash. The colour lands instantly, the class is dropped after ~300ms,
+   and the transition then fades it back out over ~250ms. */
+.price-cell {
+  border-radius: 2px;
+  transition:
+    background-color 250ms ease-out,
+    color 250ms ease-out;
+}
+
+.price-cell.flash-up {
+  background-color: rgba(38, 166, 91, 0.28);
+  color: #7ee2a8;
+  transition: none;
+}
+
+.price-cell.flash-down {
+  background-color: rgba(224, 69, 62, 0.28);
+  color: #ff9a95;
+  transition: none;
+}
+
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Thin scrollbars so dense panels do not lose width to browser chrome. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-terminal-border) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-thumb {
+  background: var(--color-terminal-border);
+  border-radius: 4px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .price-cell {
+    transition: none;
+  }
+}

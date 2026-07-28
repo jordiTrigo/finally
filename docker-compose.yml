@@ -1,0 +1,17 @@
+services:
+  finally:
+    build: .
+    image: finally
+    container_name: finally
+    ports:
+      - "8001:8001"
+    env_file:
+      - .env
+    volumes:
+      - finally-data:/app/db
+    restart: unless-stopped
+
+volumes:
+  # Named explicitly so compose shares the volume the scripts and docker run use.
+  finally-data:
+    name: finally-data

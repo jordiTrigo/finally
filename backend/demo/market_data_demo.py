@@ -16,7 +16,8 @@ import webbrowser
 import uvicorn
 from fastapi.responses import HTMLResponse
 
-from app.main import DEFAULT_WATCHLIST, app
+from app.db.schema import DEFAULT_WATCHLIST
+from app.main import app
 from app.market.factory import create_market_data_source
 
 PAGE = pathlib.Path(__file__).with_name("index.html")
